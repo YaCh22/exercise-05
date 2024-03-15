@@ -1,0 +1,340 @@
+---
+title: "Exercise_05_Challenge2"
+output: html_document
+date: "2024-03-09"
+---
+
+```{r}
+#install.packages("sciplot")
+library("tidyverse")
+library("dplyr")
+library("mosaic")
+library("ggplot2")
+library("infer")
+library("cowplot")
+library("sciplot")
+```
+
+Challenge 2 Step 1
+
+
+```{r}
+f <- "https://raw.githubusercontent.com/difiore/ada-2024-datasets/main/zombies.csv"
+d <- read_csv(f, col_names = TRUE)
+str(d)
+```
+
+Step 2
+```{r}
+pop_var <- function(x) {
+    sum((x - mean(x))^2)/(length(x))
+}
+
+pop_sd <- function(x) {
+    sqrt(pop_var(x))
+}
+
+```
+
+```{r}
+d_2 <- d %>%
+  select(-id) %>%
+  select_if(is.numeric)
+
+(variables <- colnames(d_2))
+```
+
+
+
+```{r}
+pop_stats_for_col <- function(col) {
+  pop_stats <- d_2 %>%  
+    summarise_at(col, funs(mean, pop_sd)) %>%
+    mutate(variable = col)
+  
+  return(pop_stats)
+}
+
+```
+
+
+```{r}
+pop_stats <- lapply(variables, pop_stats_for_col)
+(pop_stats_allvar <- do.call(bind_rows, pop_stats))
+```
+
+Step 3
+```{r}
+d_ggplot <- bind_cols(d_2, d$gender) %>%
+  rename(gender = ...6)
+
+str(d_ggplot)
+```
+
+```{r}
+box_variable = function(variable) {
+  p <- ggplot(d_ggplot, aes_string("gender", variable)) +
+    geom_boxplot()
+  return(p)
+}
+```
+
+```{r}
+boxlist <- lapply(variables, box_variable)
+plot_grid(plotlist=boxlist)
+```
+
+Step 4
+```{r}
+p1 <- ggplot(d, aes(age, height, color = gender)) + 
+  geom_point() 
+p2 <- ggplot(d, aes(age, weight, color = gender)) + 
+  geom_point() 
+
+plot_grid(p1,p2)
+```
+
+Step 5
+```{r}
+qq_variable <- function(col) {
+  d_qq <- d %>%  
+    select(col)
+
+  qqnorm(d_qq[[1]], main = paste0(col))
+  qqline(d_qq[[1]])
+}
+
+```
+
+
+```{r}
+hist_variable <- function(col) {
+  d_hist <- d %>%  
+    select(col)
+
+  hist(d_hist[[1]], main = "", xlab = paste(col))
+}
+
+```
+
+
+
+
+
+```{r}
+par(mfrow=c(2,5))
+qqlist <- lapply(variables, qq_variable)
+histlist <- lapply(variables, hist_variable)
+```
+"zombies_killed," "years_of_education": poisson
+Others: normal
+
+Step 6
+```{r}
+sample <- d %>%
+  slice_sample(n = 50, replace = FALSE)
+
+sample
+```
+
+
+
+```{r}
+
+sample_stats_for_col <- function(col) {
+  samp_stats <- sample %>%  
+    summarise_at(col, funs(mean, sd, se)) %>%
+    mutate(variable = col)
+  
+  return(samp_stats)
+}
+
+
+
+```
+
+```{r}
+samp_stats <- lapply(variables, sample_stats_for_col)
+(samp_stats_allvar <- do.call(bind_rows, samp_stats))
+```
+
+```{r}
+percent_ci <- 95
+alpha <- 1 - percent_ci/100 
+
+```
+
+```{r}
+
+
+ci_variable <- function(col) {
+  
+  
+  samp_stats <- sample %>%  
+    summarise_at(col, funs(mean, ci_lower, ci_upper)) %>%
+    mutate(variable = col)
+  
+  return(samp_stats)
+}
+
+
+
+```
+
+```{r}
+ci_lower <- function(x) {
+    mean(x) + qnorm(alpha/2) * se(x)
+}
+ci_upper <- function(x) {
+    mean(x) + qnorm(alpha/2, lower.tail = FALSE) * se(x)
+}
+```
+
+
+```{r}
+cis <- lapply(variables, ci_variable)
+(ci_sample_allvar <- do.call(bind_rows, cis))
+```
+
+Step 7
+```{r}
+samples <- d %>%
+    rep_sample_n(size = 50, reps = 199, replace = FALSE) %>%
+    group_by(replicate)
+
+str(samples)
+```
+
+```{r}
+sample <- sample %>%
+  mutate(replicate = "200") %>%
+  select(replicate, everything()) %>%
+  mutate(replicate = as.integer(replicate))
+
+str(sample)
+```
+
+```{r}
+samples <- bind_rows(samples, sample)
+```
+
+
+
+```{r}
+samples_mean_variable <- function(col) {
+  temp <- samples %>% 
+    group_by(replicate)%>%
+    summarise_at(col, mean) %>%
+    rename(mean = col) %>%
+    select(replicate, mean) %>%
+    mutate(variable = col)
+  
+  return(temp)
+}
+```
+
+
+
+
+```{r}
+sample_means <- lapply(variables, samples_mean_variable)
+(All_samples_means <- do.call(bind_rows, sample_means))
+
+```
+```{r}
+All_samples_stats <- All_samples_means %>%
+        group_by(variable) %>%
+        summarise(samp_dist_mean = mean(mean), samp_dist_se = sd(mean))
+All_samples_stats
+```
+
+
+```{r}
+(compare <- inner_join(All_samples_stats[,c(1,3)], samp_stats_allvar[,c(3,4)], by="variable"))
+```
+Step 8
+
+
+```{r}
+All_samples_hist_variable <- function(col) {
+  return(hist(All_samples_means$mean[All_samples_means$variable == col], main = "", xlab = paste(col)))
+}
+
+```
+
+
+
+
+
+```{r}
+par(mfrow=c(2,3))
+All_samples_histlist <- lapply(variables, All_samples_hist_variable)
+```
+
+Step 9
+```{r}
+All_samples_means_ci <- function(col) {
+  temp <- All_samples_means$mean[All_samples_means$variable == col] %>%
+    summarise_at(col, funs(mean, ci_lower, ci_upper)) %>%
+    mutate(variable = col)
+  
+  return(temp)
+}
+
+```
+
+
+```{r}
+All_samples_means_ci <- All_samples_means %>%
+  group_by(variable) %>%
+  summarise(upper_bound = quantile(mean, 0.975), lower_bound = quantile(mean, 0.025), mean = mean(mean))
+
+All_samples_means_ci
+```
+
+Step 10
+
+```{r}
+boot_ci <- function(col) {
+  n_boot <- 1000
+boot <- vector(length = n_boot)  
+s0 <- sample %>%
+  select(col)
+s <- s0[[1]]
+n <- length(s)
+for (i in 1:n_boot) {
+    boot[[i]] <- mean(sample(s, n, replace = TRUE))
+}
+
+boot_cis <- data.frame(col, quantile(boot, 0.025), quantile(boot, 0.975))
+colnames(boot_cis)<- c("variable","lower_boot_ci","upper_boot_ci")
+return(boot_cis)
+}
+```
+
+
+```{r}
+boot_ci <- function(col) {
+  n_boot <- 1000
+boot <- vector(length = n_boot)  
+s0 <- sample %>%
+  select(col)
+s <- s0[[1]]
+n <- length(s)
+for (i in 1:n_boot) {
+    boot[[i]] <- mean(sample(s, n, replace = TRUE))
+}
+
+boot_cis <- data.frame(col, quantile(boot, 0.025), quantile(boot, 0.975))
+colnames(boot_cis)<- c("variable","lower_boot_ci","upper_boot_ci")
+rownames(boot_cis) <- NULL
+return(boot_cis)
+}
+```
+
+```{r}
+boot_cis <- lapply(variables, boot_ci)
+(boot_cis_allvar <- do.call(bind_rows, boot_cis))
+```
+
+
